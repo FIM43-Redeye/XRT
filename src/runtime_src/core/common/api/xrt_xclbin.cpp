@@ -856,9 +856,18 @@ class xclbin_full : public xclbin_impl
     if (strncmp(tmp->m_magic, "xclbin2", strlen("xclbin2")) != 0) // Future: Do not hardcode "xclbin2"
       throw std::runtime_error("Invalid xclbin");
 
-    // m_length must match the actual buffer size we loaded
-    if (tmp->m_header.m_length != m_axlf.size())
-      throw std::runtime_error("xclbin: m_length does not match buffer size");
+    // m_length must not exceed the buffer we loaded. A longer buffer is
+    // trimmed to m_length: Ryzen AI 1.8 embeds xclbins in xmodels with one
+    // trailing byte, which XRT 2.19 accepted. Trimming keeps every later
+    // bounds check measured against the xclbin's own declared extent.
+    if (tmp->m_header.m_length > m_axlf.size())
+      throw std::runtime_error("xclbin: m_length exceeds buffer size");
+    if (tmp->m_header.m_length < m_axlf.size()) {
+      m_axlf.resize(tmp->m_header.m_length);
+      if (m_axlf.size() < sizeof(axlf))
+        throw std::runtime_error("xclbin: m_length too small to contain header");
+      tmp = reinterpret_cast<const axlf*>(m_axlf.data());
+    }
 
     // Ensure the section header array fits within the buffer before iterating
     static const uint64_t max_sections_allowed = 10000;
